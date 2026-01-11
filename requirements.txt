@@ -1,2 +1,3 @@
 pip install pytesseract pillow opencv-python pdf2image
 pip freeze
+pip install python-multipart

@@ -1,23 +1,17 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
-from PIL import Image, UnidentifiedImageError
-from typing import List
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from PIL import Image
 import io
+from typing import List
 
 from app.services.ocr.image_preprocessor import preprocess_image
 from app.services.ocr.tesseract_engine import extract_text_from_image
 from app.services.ocr.pdf_handler import pdf_to_images
+from app.models.response import InvoiceOCRResponse
 
 router = APIRouter(
     prefix="/invoice",
     tags=["Invoice Intelligence"],
 )
-
-
-SUPPORTED_CONTENT_TYPES = {
-    "image/png",
-    "image/jpeg",
-    "application/pdf",
-}
 
 
 @router.post(
@@ -30,104 +24,85 @@ SUPPORTED_CONTENT_TYPES = {
         "- image/jpeg\n"
         "- application/pdf"
     ),
+    response_model=InvoiceOCRResponse,
 )
 async def extract_invoice(file: UploadFile = File(...)):
     """
     Extract raw OCR text from invoice images or PDFs.
 
     This endpoint performs:
-    1. File validation
-    2. PDF-to-image conversion (if applicable)
-    3. Image preprocessing
-    4. OCR text extraction using Tesseract
+    1. File type validation
+    2. Image/PDF preprocessing
+    3. OCR text extraction using Tesseract
 
-    Returns extracted raw text suitable for downstream parsing.
+    Returns structured metadata along with raw OCR text.
     """
 
-    # --- Validate content type ---
+    # Validate content type
     if not file.content_type:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unable to detect file content type",
+            status_code=400,
+            detail="File content type could not be detected",
         )
 
-    if file.content_type not in SUPPORTED_CONTENT_TYPES:
+    allowed_types = {
+        "image/png",
+        "image/jpeg",
+        "application/pdf",
+    }
+
+    if file.content_type not in allowed_types:
         raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            status_code=415,
             detail=f"Unsupported file type: {file.content_type}",
         )
 
-    # --- Read file content ---
     try:
-        content: bytes = await file.read()
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to read uploaded file",
-        )
+        content = await file.read()
+        extracted_text_parts: List[str] = []
 
-    if not content:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty",
-        )
-
-    extracted_text_parts: List[str] = []
-
-    try:
-        # --- PDF handling ---
+        # Handle PDF files
         if file.content_type == "application/pdf":
             images = pdf_to_images(content)
 
             if not images:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=400,
                     detail="No images could be extracted from the PDF",
                 )
 
             for image in images:
                 processed_image = preprocess_image(image)
                 text = extract_text_from_image(processed_image)
-                if text:
-                    extracted_text_parts.append(text)
-
-        # --- Image handling ---
-        else:
-            try:
-                image = Image.open(io.BytesIO(content))
-            except UnidentifiedImageError:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Invalid or corrupted image file",
-                )
-
-            processed_image = preprocess_image(image)
-            text = extract_text_from_image(processed_image)
-            if text:
                 extracted_text_parts.append(text)
 
+        # Handle image files
+        else:
+            image = Image.open(io.BytesIO(content))
+            processed_image = preprocess_image(image)
+            text = extract_text_from_image(processed_image)
+            extracted_text_parts.append(text)
+
+        extracted_text = "\n".join(extracted_text_parts).strip()
+
+        if not extracted_text:
+            raise HTTPException(
+                status_code=422,
+                detail="No text could be extracted from the document",
+            )
+
+        return InvoiceOCRResponse(
+            filename=file.filename,
+            content_type=file.content_type,
+            raw_text=extracted_text,
+        )
+
     except HTTPException:
-        # Re-raise controlled exceptions
+        # Re-raise known HTTP errors
         raise
 
-    except Exception as e:
-        # Catch-all for OCR engine / system failures
+    except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"OCR processing failed: {str(e)}",
+            status_code=500,
+            detail=f"OCR processing failed: {str(exc)}",
         )
-
-    # --- Final text aggregation ---
-    extracted_text = "\n".join(extracted_text_parts).strip()
-
-    if not extracted_text:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No text could be extracted from the document",
-        )
-
-    return {
-        "filename": file.filename,
-        "content_type": file.content_type,
-        "raw_text": extracted_text,
-    }

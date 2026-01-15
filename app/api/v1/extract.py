@@ -1,8 +1,9 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from PIL import Image
 import io
 from typing import List
 
+from app.core.auth import verify_api_key
 from app.services.ocr.image_preprocessor import preprocess_image
 from app.services.ocr.tesseract_engine import extract_text_from_image
 from app.services.ocr.pdf_handler import pdf_to_images
@@ -11,6 +12,7 @@ from app.models.response import InvoiceOCRResponse
 router = APIRouter(
     prefix="/invoice",
     tags=["Invoice Intelligence"],
+    dependencies=[Depends(verify_api_key)],
 )
 
 
@@ -30,15 +32,13 @@ async def extract_invoice(file: UploadFile = File(...)):
     """
     Extract raw OCR text from invoice images or PDFs.
 
-    This endpoint performs:
-    1. File type validation
-    2. Image/PDF preprocessing
-    3. OCR text extraction using Tesseract
-
-    Returns structured metadata along with raw OCR text.
+    Processing steps:
+    1. Validate file type
+    2. Convert PDF pages to images (if applicable)
+    3. Preprocess image(s)
+    4. Extract text using Tesseract OCR
     """
 
-    # Validate content type
     if not file.content_type:
         raise HTTPException(
             status_code=400,
@@ -61,7 +61,7 @@ async def extract_invoice(file: UploadFile = File(...)):
         content = await file.read()
         extracted_text_parts: List[str] = []
 
-        # Handle PDF files
+        # PDF handling
         if file.content_type == "application/pdf":
             images = pdf_to_images(content)
 
@@ -72,16 +72,18 @@ async def extract_invoice(file: UploadFile = File(...)):
                 )
 
             for image in images:
-                processed_image = preprocess_image(image)
-                text = extract_text_from_image(processed_image)
-                extracted_text_parts.append(text)
+                processed = preprocess_image(image)
+                text = extract_text_from_image(processed)
+                if text:
+                    extracted_text_parts.append(text)
 
-        # Handle image files
+        # Image handling
         else:
             image = Image.open(io.BytesIO(content))
-            processed_image = preprocess_image(image)
-            text = extract_text_from_image(processed_image)
-            extracted_text_parts.append(text)
+            processed = preprocess_image(image)
+            text = extract_text_from_image(processed)
+            if text:
+                extracted_text_parts.append(text)
 
         extracted_text = "\n".join(extracted_text_parts).strip()
 
@@ -98,7 +100,6 @@ async def extract_invoice(file: UploadFile = File(...)):
         )
 
     except HTTPException:
-        # Re-raise known HTTP errors
         raise
 
     except Exception as exc:

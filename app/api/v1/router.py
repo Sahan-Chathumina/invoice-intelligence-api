@@ -1,6 +1,6 @@
 from fastapi import APIRouter
-from app.api.v1.extract import router as invoice_router
+from app.api.v1.extract import router as extract_router
 
-api_router = APIRouter()
+router = APIRouter(prefix="/api/v1")
 
-api_router.include_router(invoice_router)
+router.include_router(extract_router)

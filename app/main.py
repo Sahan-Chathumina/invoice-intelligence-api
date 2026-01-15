@@ -1,16 +1,14 @@
 from fastapi import FastAPI
-from app.api.v1.router import router as api_v1_router
+from app.api.v1.router import api_router
 
 app = FastAPI(
     title="Invoice & Receipt Intelligence API",
     version="1.0.0",
-    description="Extract structured data from invoices and receipts",
+    description="Extract structured data from invoices and receipts"
 )
 
-# Versioned API
-app.include_router(api_v1_router)
+app.include_router(api_router, prefix="/api/v1")
 
-# Public health check
-@app.get("/health", tags=["Health"])
+@app.get("/health")
 def health_check():
     return {"status": "ok"}

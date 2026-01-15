@@ -17,3 +17,10 @@ Thumbs.db
 
 # Logs
 *.log
+
+[eE]
+[[]auth]
+[[]internal]
+CACHED
+exporting
+docker

@@ -1,14 +1,16 @@
 from fastapi import FastAPI
-from app.api.v1.router import api_router
+from app.api.v1.router import router as api_v1_router
 
 app = FastAPI(
-    title="Invoice & Receipt Intelligence API",
+    title="Invoice Intelligence API",
+    description="Invoice OCR and structured data extraction API",
     version="1.0.0",
-    description="Extract structured data from invoices and receipts"
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_v1_router)
 
-@app.get("/health")
-def health_check():
+@app.get("/ping", include_in_schema=False)
+def ping():
     return {"status": "ok"}
